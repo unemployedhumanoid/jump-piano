@@ -1,0 +1,24 @@
+{
+	"geode": "4.0.0",
+	"gd": {
+		"win": "2.2074",
+		"android": "2.2074",
+		"mac": "2.2074",
+		"ios": "2.2074"
+	},
+	"id": "yourname.jump-piano",
+	"name": "Jump Piano",
+	"version": "v1.0.0",
+	"developer": "yourname",
+	"description": "Plays a piano note just before each jump you recorded in practice mode, so you can learn the timing by ear.",
+	"settings": {
+		"lead-ms": {
+			"type": "int",
+			"name": "Cue lead (ms)",
+			"description": "How many milliseconds before the jump the piano note plays.",
+			"default": 100,
+			"min": 0,
+			"max": 500
+		}
+	}
+}
