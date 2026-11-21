@@ -88,8 +88,8 @@ namespace {
 }
 
 class $modify(JumpPianoPlayLayer, PlayLayer) {
-	bool init(GJGameLevel* level, bool useReplay) {
-		if (!PlayLayer::init(level, useReplay)) return false;
+	bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
+		if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 		g_saved = Mod::get()->getSavedValue<std::vector<float>>(levelKey(level), {});
 		std::sort(g_saved.begin(), g_saved.end());
 		g_recorded.clear();

@@ -26,7 +26,8 @@ jobs:
         with:
           bindings: geode-sdk/bindings
           bindings-ref: main
-          sdk: nightly
+          sdk: latest
+          configure-args: -DCMAKE_CXX_FLAGS=-DFMT_USE_CONSTEVAL=0
           combine: true
           target: ${{ matrix.config.target }}
 
