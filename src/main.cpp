@@ -8,25 +8,29 @@
 using namespace geode::prelude;
 
 namespace {
+	constexpr int NOTE_COUNT = 7;
+	// C5 D5 E5 F5 G5 A5 B5
+	const double NOTE_FREQ[NOTE_COUNT] = {523.25, 587.33, 659.25, 698.46, 783.99, 880.00, 987.77};
+
 	// Jump positions (player X) saved for the current level.
 	std::vector<float> g_saved;
 	// Jumps recorded in the current practice run.
 	std::vector<float> g_recorded;
 	size_t g_nextCue = 0;
 
-	FMOD::Sound* g_sound = nullptr;
-	std::vector<short> g_pcm;
+	FMOD::Sound* g_sounds[NOTE_COUNT] = {nullptr};
+	std::vector<short> g_pcm[NOTE_COUNT];
 
 	std::string levelKey(GJGameLevel* level) {
 		return fmt::format("jumps-{}", level->m_levelID.value());
 	}
 
-	// Build a piano-like C5 note: a few decaying harmonics with a short attack.
-	void buildNote() {
-		if (!g_pcm.empty()) return;
+	// Build a piano-like note: a few decaying harmonics with a short attack.
+	void buildNote(int idx) {
+		if (!g_pcm[idx].empty()) return;
 		const int rate = 44100;
 		const int n = static_cast<int>(rate * 0.8);
-		const double f = 523.25;
+		const double f = NOTE_FREQ[idx];
 		const double amps[] = {1.0, 0.5, 0.35, 0.2, 0.12, 0.08};
 		std::vector<double> buf(n, 0.0);
 		double peak = 0.0;
@@ -36,38 +40,37 @@ namespace {
 			for (int h = 0; h < 6; h++) {
 				s += amps[h] * std::sin(2.0 * M_PI * f * (h + 1) * t) * std::exp(-t * (3.0 + h * 1.5));
 			}
-			double attack = std::min(1.0, t / 0.005);
-			s *= attack;
+			s *= std::min(1.0, t / 0.005);
 			buf[i] = s;
 			peak = std::max(peak, std::fabs(s));
 		}
-		g_pcm.resize(n);
+		g_pcm[idx].resize(n);
 		for (int i = 0; i < n; i++) {
-			g_pcm[i] = static_cast<short>(buf[i] / peak * 0.6 * 32767.0);
+			g_pcm[idx][i] = static_cast<short>(buf[i] / peak * 0.6 * 32767.0);
 		}
 	}
 
-	void playNote() {
+	void playNote(int idx) {
 		auto engine = FMODAudioEngine::sharedEngine();
 		if (!engine || !engine->m_system) return;
 		auto sys = engine->m_system;
-		if (!g_sound) {
-			buildNote();
+		if (!g_sounds[idx]) {
+			buildNote(idx);
 			FMOD_CREATESOUNDEXINFO ex{};
 			ex.cbsize = sizeof(ex);
-			ex.length = static_cast<unsigned int>(g_pcm.size() * sizeof(short));
+			ex.length = static_cast<unsigned int>(g_pcm[idx].size() * sizeof(short));
 			ex.numchannels = 1;
 			ex.defaultfrequency = 44100;
 			ex.format = FMOD_SOUND_FORMAT_PCM16;
 			sys->createSound(
-				reinterpret_cast<const char*>(g_pcm.data()),
+				reinterpret_cast<const char*>(g_pcm[idx].data()),
 				FMOD_OPENRAW | FMOD_OPENMEMORY | FMOD_CREATESAMPLE,
-				&ex, &g_sound
+				&ex, &g_sounds[idx]
 			);
 		}
-		if (g_sound) {
+		if (g_sounds[idx]) {
 			FMOD::Channel* ch = nullptr;
-			sys->playSound(g_sound, nullptr, false, &ch);
+			sys->playSound(g_sounds[idx], nullptr, false, &ch);
 		}
 	}
 
@@ -88,12 +91,41 @@ namespace {
 }
 
 class $modify(JumpPianoPlayLayer, PlayLayer) {
+	struct Fields {
+		std::vector<CCLayerColor*> keys;
+	};
+
+	void buildPiano() {
+		auto win = CCDirector::get()->getWinSize();
+		const float keyW = 30.f;
+		const float keyH = 55.f;
+		const float gap = 2.f;
+		float total = NOTE_COUNT * keyW + (NOTE_COUNT - 1) * gap;
+		float startX = (win.width - total) / 2.f;
+
+		for (int i = 0; i < NOTE_COUNT; i++) {
+			auto key = CCLayerColor::create(ccc4(255, 255, 255, 190), keyW, keyH);
+			key->setPosition({startX + i * (keyW + gap), 4.f});
+			m_uiLayer->addChild(key, 100);
+			m_fields->keys.push_back(key);
+		}
+	}
+
+	void flashKey(int idx) {
+		if (idx < 0 || idx >= static_cast<int>(m_fields->keys.size())) return;
+		auto key = m_fields->keys[idx];
+		key->stopAllActions();
+		key->setColor(ccc3(255, 200, 0));
+		key->runAction(CCTintTo::create(0.3f, 255, 255, 255));
+	}
+
 	bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
 		if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 		g_saved = Mod::get()->getSavedValue<std::vector<float>>(levelKey(level), {});
 		std::sort(g_saved.begin(), g_saved.end());
 		g_recorded.clear();
 		g_nextCue = 0;
+		buildPiano();
 		return true;
 	}
 
@@ -115,7 +147,9 @@ class $modify(JumpPianoPlayLayer, PlayLayer) {
 		float dist = unitsPerSecond(m_player1->m_playerSpeed) * lead;
 		float x = m_player1->getPositionX();
 		while (g_nextCue < g_saved.size() && x >= g_saved[g_nextCue] - dist) {
-			playNote();
+			int idx = static_cast<int>(g_nextCue % NOTE_COUNT);
+			playNote(idx);
+			flashKey(idx);
 			g_nextCue++;
 		}
 	}
@@ -132,7 +166,9 @@ class $modify(JumpPianoPlayer, PlayerObject) {
 	bool pushButton(PlayerButton button) {
 		auto pl = PlayLayer::get();
 		if (pl && pl->m_isPracticeMode && this == pl->m_player1 && button == PlayerButton::Jump) {
+			int idx = static_cast<int>(g_recorded.size() % NOTE_COUNT);
 			g_recorded.push_back(this->getPositionX());
+			static_cast<JumpPianoPlayLayer*>(pl)->flashKey(idx);
 		}
 		return PlayerObject::pushButton(button);
 	}
